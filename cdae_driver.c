@@ -50,7 +50,7 @@ int main() {
     
     FILE *fin = fopen("input.bin", "rb");
     if (!fin) {
-        printf("Lỗi: Không tìm thấy file input.bin! Em nhớ chạy script Python img_to_bin.py trước nhé.\n");
+        printf("Lỗi: Không tìm thấy file input.bin! Chạy script Python img_to_bin.py trước.\n");
         return -1;
     }
     fread(full_img_in, sizeof(float), TOTAL_PIXELS, fin);
