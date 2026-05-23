@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/mmap.h>
+#include <sys/mman.h>
 
 // Cấu hình AXI4-Lite
 #define CDAE_BASE_ADDR 0xA0000000 
@@ -38,7 +38,9 @@ uint16_t float_to_q12(float val) {
 }
 
 float q12_to_float(uint16_t val) {
-    return (float)val / 4096.0f;
+    // Ép kiểu sang int16_t có dấu trước khi chia để xử lý đúng số âm nếu có
+    int16_t sval = (int16_t)val;
+    return (float)sval / 4096.0f;
 }
 
 int main() {
@@ -72,31 +74,28 @@ int main() {
             for (int h = 0; h < TILE_H; h++) {
                 for (int w = 0; w < TILE_W; w++) {
                     for (int c = 0; c < CHANNELS; c++) {
-                        // Tính vị trí pixel trong ảnh lớn
                         int img_x = (tx * TILE_W) + w;
                         int img_y = (ty * TILE_H) + h;
                         int idx_full = (img_y * IMG_W + img_x) * CHANNELS + c;
-                        
-                        // Tính vị trí trong mảng Tile 1D
                         int idx_tile = (h * TILE_W + w) * CHANNELS + c;
 
                         float pixel = full_img_in[idx_full];
-                        uint16_t q12_val = float_to_q12(pixel);
-
                         AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_INP + idx_tile);
-                        AXI_WRITE(cdae_base, REG_WDATA, q12_val);
+                        AXI_WRITE(cdae_base, REG_WDATA, float_to_q12(pixel));
                     }
                 }
             }
 
             // 3b. Chạy Inference
             AXI_WRITE(cdae_base, REG_CTRL, 1);
-            while (!(AXI_READ(cdae_base, REG_STATUS) & 0x01)); // Chờ xong
+            
+            // SỬA LỖI RACE CONDITION: CPU chạy quá nhanh, đọc STATUS trước khi FSM kịp dựng cờ Busy
+            // Bước 1: Chờ FSM xác nhận đã bắt đầu (Busy lên 1)
+            while (!(AXI_READ(cdae_base, REG_STATUS) & 0x02)); 
+            // Bước 2: Chờ FSM chạy xong (Busy rớt xuống 0)
+            while ((AXI_READ(cdae_base, REG_STATUS) & 0x02)); 
 
-            // 3c. Đọc Kết quả từ FPGA và Lắp ghép lại vào ảnh lớn
-            AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT);
-            uint32_t dummy = AXI_READ(cdae_base, REG_RDATA); // Dummy read
-
+            // 3c. Đọc Kết quả từ FPGA
             for (int h = 0; h < TILE_H; h++) {
                 for (int w = 0; w < TILE_W; w++) {
                     for (int c = 0; c < CHANNELS; c++) {
@@ -105,10 +104,8 @@ int main() {
                         int idx_full = (img_y * IMG_W + img_x) * CHANNELS + c;
                         int idx_tile = (h * TILE_W + w) * CHANNELS + c;
 
-                        if (idx_tile < TILE_PIXELS - 1) {
-                            AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT + idx_tile + 1);
-                        }
-
+                        // SỬA LỖI DUMMY READ: CPU chậm hơn RAM nên không cần đọc gối đầu
+                        AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT + idx_tile);
                         uint32_t raw_data = AXI_READ(cdae_base, REG_RDATA);
                         full_img_out[idx_full] = q12_to_float((uint16_t)(raw_data & 0xFFFF));
                     }
