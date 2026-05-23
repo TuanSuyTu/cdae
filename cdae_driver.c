@@ -77,7 +77,7 @@ int main() {
                         int img_x = (tx * TILE_W) + w;
                         int img_y = (ty * TILE_H) + h;
                         int idx_full = (img_y * IMG_W + img_x) * CHANNELS + c;
-                        int idx_tile = (h * TILE_W + w) * CHANNELS + c;
+                        int idx_tile = c * (TILE_H * TILE_W) + h * TILE_W + w;
 
                         float pixel = full_img_in[idx_full];
                         AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_INP + idx_tile);
@@ -102,7 +102,7 @@ int main() {
                         int img_x = (tx * TILE_W) + w;
                         int img_y = (ty * TILE_H) + h;
                         int idx_full = (img_y * IMG_W + img_x) * CHANNELS + c;
-                        int idx_tile = (h * TILE_W + w) * CHANNELS + c;
+                        int idx_tile = c * (TILE_H * TILE_W) + h * TILE_W + w;
 
                         // SỬA LỖI DUMMY READ: CPU chậm hơn RAM nên không cần đọc gối đầu
                         AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT + idx_tile);
