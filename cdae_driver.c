@@ -4,12 +4,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mmap.h>
+#include <time.h> // Them thu vien de su dung clock_gettime
 
-// =========================================================
-// Cấu hình thanh ghi AXI4-Lite (Dựa trên cdae_axi_wrapper.v)
-// =========================================================
-// LƯU Ý: Thay thế địa chỉ này bằng địa chỉ thật trong tab 
-// Address Editor của Vivado Block Design (VD: 0x40000000)
+
 #define CDAE_BASE_ADDR 0xA0000000 
 #define CDAE_MAP_SIZE  0x1000
 
@@ -43,6 +40,13 @@ float q12_to_float(uint16_t val) {
 }
 
 int main() {
+    // Khai bao cac bien de luu moc thoi gian
+    struct timespec t_start_total, t_end_total;
+    struct timespec t_start_write, t_end_write;
+    struct timespec t_start_calc,  t_end_calc;
+    struct timespec t_start_read,  t_end_read;
+    double time_write, time_calc, time_read, time_total;
+
     printf("--- Khoi dong CDAE Driver tren Kria KV260 ---\n");
 
     // 1. Mở /dev/mem để map memory vật lý (Cho PetaLinux/Ubuntu)
@@ -62,6 +66,10 @@ int main() {
 
     printf("[+] Da map phan cung tai dia chi ao: %p\n", cdae_base);
 
+    // Bat dau tinh thoi gian Tong va thoi gian Ghi
+    clock_gettime(CLOCK_MONOTONIC, &t_start_total);
+    clock_gettime(CLOCK_MONOTONIC, &t_start_write);
+
     // =========================================================
     // PHA 1: CHUẨN BỊ DỮ LIỆU VÀ NẠP XUỐNG FPGA
     // =========================================================
@@ -77,6 +85,10 @@ int main() {
         AXI_WRITE(cdae_base, REG_WDATA, q12_val);
     }
     printf("[+] Nap du lieu hoan tat!\n");
+
+    // Ket thuc thoi gian Ghi, Bat dau do thoi gian Tinh toan
+    clock_gettime(CLOCK_MONOTONIC, &t_end_write);
+    clock_gettime(CLOCK_MONOTONIC, &t_start_calc);
 
     // =========================================================
     // PHA 2: RA LỆNH CHẠY INFERENCE
@@ -96,6 +108,10 @@ int main() {
         }
     }
     printf("[+] Inference hoan tat! Dang doc ket qua...\n");
+
+    // Ket thuc thoi gian Tinh toan, Bat dau do thoi gian Doc
+    clock_gettime(CLOCK_MONOTONIC, &t_end_calc);
+    clock_gettime(CLOCK_MONOTONIC, &t_start_read);
 
     // =========================================================
     // PHA 4: ĐỌC DỮ LIỆU KẾT QUẢ TỪ FPGA
@@ -124,6 +140,24 @@ int main() {
     for (int i = 0; i < 5; i++) {
         printf("    Pixel[%d] = %f\n", i, output_tile[i]);
     }
+
+    // Ket thuc thoi gian Doc va Tong thoi gian
+    clock_gettime(CLOCK_MONOTONIC, &t_end_read);
+    clock_gettime(CLOCK_MONOTONIC, &t_end_total);
+
+    // Tinh toan chenh lech thoi gian va quy doi ra ms (mili-giay)
+    time_write = (t_end_write.tv_sec - t_start_write.tv_sec) * 1000.0 + (t_end_write.tv_nsec - t_start_write.tv_nsec) / 1000000.0;
+    time_calc  = (t_end_calc.tv_sec - t_start_calc.tv_sec)   * 1000.0 + (t_end_calc.tv_nsec - t_start_calc.tv_nsec)   / 1000000.0;
+    time_read  = (t_end_read.tv_sec - t_start_read.tv_sec)   * 1000.0 + (t_end_read.tv_nsec - t_start_read.tv_nsec)   / 1000000.0;
+    time_total = (t_end_total.tv_sec - t_start_total.tv_sec) * 1000.0 + (t_end_total.tv_nsec - t_start_total.tv_nsec) / 1000000.0;
+
+    printf("\n================ BANG THONG KE THOI GIAN =================\n");
+    printf("1. Thoi gian GHI data: %10.3f ms\n", time_write);
+    printf("2. Thoi gian TINH TOAN:     %10.3f ms\n", time_calc);
+    printf("3. Thoi gian DOC data: %10.3f ms\n", time_read);
+    printf("----------------------------------------------------------\n");
+    printf("=> Tong thoi gian:           %10.3f ms\n", time_total);
+    printf("==========================================================\n\n");
 
     // 5. Cleanup
     munmap(cdae_base, CDAE_MAP_SIZE);
