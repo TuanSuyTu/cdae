@@ -14,7 +14,7 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <math.h>
-
+#include <string.h>
 #define CDAE_BASE_ADDR 0xA0000000
 #define CDAE_MAP_SIZE  0x1000
 
