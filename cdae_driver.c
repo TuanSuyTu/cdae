@@ -53,15 +53,15 @@ float q12_to_float(uint16_t val) {
 }
 
 void extract_tile(const float *src_image, float *dst_tile, int ty, int tx) {
-    // dst_tile gui xuong FPGA phai la dang CHW (Channel-Height-Width)
-    // src_image doc tu file bin bay gio DA LA CHW
+    // src_image: CHW (da xac nhan bang kiem tra binary file)
+    // dst_tile:  CHW (gui xuong FPGA theo thu tu i tang dan)
     for (int c = 0; c < IMG_C; c++) {
         for (int dy = 0; dy < TILE_H; dy++) {
             for (int dx = 0; dx < TILE_W; dx++) {
                 int src_y = ty * TILE_H + dy;
                 int src_x = tx * TILE_W + dx;
                 int src_idx = c * (IMG_W * IMG_H) + src_y * IMG_W + src_x;
-                int dst_idx = (c * TILE_H + dy) * TILE_W + dx;
+                int dst_idx = c * (TILE_H * TILE_W) + dy * TILE_W + dx;
                 dst_tile[dst_idx] = src_image[src_idx];
             }
         }
@@ -69,15 +69,15 @@ void extract_tile(const float *src_image, float *dst_tile, int ty, int tx) {
 }
 
 void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
-    // src_tile nhan tu FPGA la dang CHW
-    // dst_image ghi ra file bin bay gio CUNG LA CHW
+    // src_tile: CHW (nhan tu FPGA theo thu tu i tang dan)
+    // dst_image: CHW (ghi ra output.bin)
     for (int c = 0; c < IMG_C; c++) {
         for (int dy = 0; dy < TILE_H; dy++) {
             for (int dx = 0; dx < TILE_W; dx++) {
                 int dst_y = ty * TILE_H + dy;
                 int dst_x = tx * TILE_W + dx;
                 int dst_idx = c * (IMG_W * IMG_H) + dst_y * IMG_W + dst_x;
-                int src_idx = (c * TILE_H + dy) * TILE_W + dx;
+                int src_idx = c * (TILE_H * TILE_W) + dy * TILE_W + dx;
                 dst_image[dst_idx] = src_tile[src_idx];
             }
         }
