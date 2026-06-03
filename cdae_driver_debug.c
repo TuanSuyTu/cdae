@@ -151,12 +151,11 @@ int poll_status_with_timeout(void *cdae_base, int timeout_seconds) {
     while (1) {
         status = AXI_READ(cdae_base, REG_STATUS);
 
-        // Bit 0 = done_inference. Doi cho den khi done = 1
-        if (status & 0x01) {
+        // Bit 1 = inference_busy. Doi cho den khi busy = 0 (tuc la chay xong)
+        // Vi bit 0 (done) chi chop 1 clock (10ns) nen Linux doc khong bao gio kip!
+        if ((status & 0x02) == 0) {
             printf("[DONE] Inference hoan thanh! STATUS=0x%08x (done=%d, busy=%d, polls=%lld)\n",
                    status, status & 1, (status >> 1) & 1, poll_count);
-            // Quan trong: reset REG_CTRL ve 0 de FSM thoat ST_DONE
-            AXI_WRITE(cdae_base, REG_CTRL, 0);
             return 1;
         }
 

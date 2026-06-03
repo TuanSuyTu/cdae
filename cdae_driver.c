@@ -212,26 +212,18 @@ int main() {
             clock_gettime(CLOCK_MONOTONIC, &t_start_calc);
             AXI_WRITE(cdae_base, REG_CTRL, 1);
 
+            // Bat buoc doc lai de dam bao lenh Write (start) da duoc AXI day xuong FPGA
+            AXI_READ(cdae_base, REG_CTRL); 
+
             uint32_t status = 0;
-            uint32_t timeout = 0;
-            // Poll bit 0 (done_inference) - timeout sau 10 trieu lan doc
+            // Cho FPGA xu ly xong bang cach poll cờ busy (bit 1) ve 0
+            // Vi cờ done (bit 0) chi chop 1 xung (10ns) nen CPU de bi bo lo!
             while (1) {
                 status = AXI_READ(cdae_base, REG_STATUS);
-                if (status & 0x01) { // Bit 0 = done_inference
+                if ((status & 0x02) == 0) { // Kiem tra bit 1 (busy == 0)
                     break;
                 }
-                timeout++;
-                if (timeout >= 10000000) {
-                    printf("[TIMEOUT] REG_STATUS = 0x%08X (bit0=done=%d, bit1=busy=%d)\n",
-                           status, (status & 0x01), (status >> 1) & 0x01);
-                    printf("[TIMEOUT] Bit stream co the chua duoc nap, hoac done khong duoc assert.\n");
-                    printf("[TIMEOUT] Thu kiem tra: 1) bitstream da nap chua? 2) clock FPGA co len chua?\n");
-                    break; // Thoat de khong treo mai mai
-                }
             }
-            
-            // Reset REG_CTRL ve 0 de FPGA thoat khoi ST_DONE (neu can)
-            AXI_WRITE(cdae_base, REG_CTRL, 0);
             clock_gettime(CLOCK_MONOTONIC, &t_end_calc);
 
             clock_gettime(CLOCK_MONOTONIC, &t_start_read);
