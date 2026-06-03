@@ -213,17 +213,24 @@ int main() {
             AXI_WRITE(cdae_base, REG_CTRL, 1);
 
             uint32_t status = 0;
-            // Cho FPGA xu ly xong bang cach poll bit 0 (done_inference)
-            // Bitstream hien tai tren board co the thiet ke REG_CTRL dang Level,
-            // khien FSM bi mac ket o ST_DONE neu khong xoa REG_CTRL ve 0.
+            uint32_t timeout = 0;
+            // Poll bit 0 (done_inference) - timeout sau 10 trieu lan doc
             while (1) {
                 status = AXI_READ(cdae_base, REG_STATUS);
-                if (status & 0x01) { // Kiem tra bit 0 (done)
+                if (status & 0x01) { // Bit 0 = done_inference
                     break;
+                }
+                timeout++;
+                if (timeout >= 10000000) {
+                    printf("[TIMEOUT] REG_STATUS = 0x%08X (bit0=done=%d, bit1=busy=%d)\n",
+                           status, (status & 0x01), (status >> 1) & 0x01);
+                    printf("[TIMEOUT] Bit stream co the chua duoc nap, hoac done khong duoc assert.\n");
+                    printf("[TIMEOUT] Thu kiem tra: 1) bitstream da nap chua? 2) clock FPGA co len chua?\n");
+                    break; // Thoat de khong treo mai mai
                 }
             }
             
-            // Reset REG_CTRL ve 0 de thoat khoi trang thai ST_DONE
+            // Reset REG_CTRL ve 0 de FPGA thoat khoi ST_DONE (neu can)
             AXI_WRITE(cdae_base, REG_CTRL, 0);
             clock_gettime(CLOCK_MONOTONIC, &t_end_calc);
 
