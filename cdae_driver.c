@@ -54,13 +54,13 @@ float q12_to_float(uint16_t val) {
 
 void extract_tile(const float *src_image, float *dst_tile, int ty, int tx) {
     // dst_tile gui xuong FPGA phai la dang CHW (Channel-Height-Width)
-    // src_image doc tu file bin dang la HWC (Height-Width-Channel)
+    // src_image doc tu file bin bay gio DA LA CHW
     for (int c = 0; c < IMG_C; c++) {
         for (int dy = 0; dy < TILE_H; dy++) {
             for (int dx = 0; dx < TILE_W; dx++) {
                 int src_y = ty * TILE_H + dy;
                 int src_x = tx * TILE_W + dx;
-                int src_idx = (src_y * IMG_W + src_x) * IMG_C + c;
+                int src_idx = c * (IMG_W * IMG_H) + src_y * IMG_W + src_x;
                 int dst_idx = (c * TILE_H + dy) * TILE_W + dx;
                 dst_tile[dst_idx] = src_image[src_idx];
             }
@@ -70,13 +70,13 @@ void extract_tile(const float *src_image, float *dst_tile, int ty, int tx) {
 
 void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
     // src_tile nhan tu FPGA la dang CHW
-    // dst_image ghi ra file bin phai la HWC
+    // dst_image ghi ra file bin bay gio CUNG LA CHW
     for (int c = 0; c < IMG_C; c++) {
         for (int dy = 0; dy < TILE_H; dy++) {
             for (int dx = 0; dx < TILE_W; dx++) {
                 int dst_y = ty * TILE_H + dy;
                 int dst_x = tx * TILE_W + dx;
-                int dst_idx = (dst_y * IMG_W + dst_x) * IMG_C + c;
+                int dst_idx = c * (IMG_W * IMG_H) + dst_y * IMG_W + dst_x;
                 int src_idx = (c * TILE_H + dy) * TILE_W + dx;
                 dst_image[dst_idx] = src_tile[src_idx];
             }
@@ -84,7 +84,7 @@ void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
     }
 }
 
-// Ham lam mo duong vien giua cac tile de giau di loi sdt (Feathering)
+// Ham lam mo duong vien giua cac tile de giau di loi sdt (Feathering) - Hoat dong tren mang CHW
 void smooth_seams(float *image, int img_w, int img_h, int tile_size, int radius) {
     float *temp = (float*)malloc(img_w * img_h * IMG_C * sizeof(float));
     memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
@@ -99,9 +99,9 @@ void smooth_seams(float *image, int img_w, int img_h, int tile_size, int radius)
                         int px = x + k;
                         if (px < 0) px = 0;
                         if (px >= img_w) px = img_w - 1;
-                        sum += temp[(y * img_w + px) * IMG_C + c];
+                        sum += temp[c * (img_w * img_h) + y * img_w + px];
                     }
-                    image[(y * img_w + x) * IMG_C + c] = sum / (2 * radius + 1);
+                    image[c * (img_w * img_h) + y * img_w + x] = sum / (2 * radius + 1);
                 }
             }
         }
@@ -119,9 +119,9 @@ void smooth_seams(float *image, int img_w, int img_h, int tile_size, int radius)
                         int py = y + k;
                         if (py < 0) py = 0;
                         if (py >= img_h) py = img_h - 1;
-                        sum += temp[(py * img_w + x) * IMG_C + c];
+                        sum += temp[c * (img_w * img_h) + py * img_w + x];
                     }
-                    image[(y * img_w + x) * IMG_C + c] = sum / (2 * radius + 1);
+                    image[c * (img_w * img_h) + y * img_w + x] = sum / (2 * radius + 1);
                 }
             }
         }
