@@ -162,9 +162,17 @@ int main() {
             AXI_WRITE(cdae_base, REG_CTRL, 1);
 
             uint32_t status = 0;
+            // Cho tin hieu busy len 1 de chac chan da nhan start
             while (1) {
                 status = AXI_READ(cdae_base, REG_STATUS);
-                if (status & 0x01) {
+                if (status & 0x02) { // Kiem tra bit 1 (busy)
+                    break;
+                }
+            }
+            // Cho tin hieu busy ve 0 de biet da tinh xong
+            while (1) {
+                status = AXI_READ(cdae_base, REG_STATUS);
+                if ((status & 0x02) == 0) { // Kiem tra bit 1 (busy)
                     break;
                 }
             }

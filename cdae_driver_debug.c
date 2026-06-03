@@ -145,8 +145,8 @@ int poll_status_with_timeout(void *cdae_base, int timeout_seconds) {
     while (1) {
         status = AXI_READ(cdae_base, REG_STATUS);
 
-        // Bit 0 = done_inference
-        if (status & 0x01) {
+        // Bit 1 = inference_busy. Doi cho den khi busy = 0
+        if ((status & 0x02) == 0) {
             printf("[DONE] Inference hoan thanh! STATUS=0x%08x (polls=%lld)\n",
                    status, poll_count);
             return 1;
