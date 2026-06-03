@@ -213,20 +213,18 @@ int main() {
             AXI_WRITE(cdae_base, REG_CTRL, 1);
 
             uint32_t status = 0;
-            // Cho tin hieu busy len 1 de chac chan da nhan start
+            // Cho FPGA xu ly xong bang cach poll bit 0 (done_inference)
+            // Bitstream hien tai tren board co the thiet ke REG_CTRL dang Level,
+            // khien FSM bi mac ket o ST_DONE neu khong xoa REG_CTRL ve 0.
             while (1) {
                 status = AXI_READ(cdae_base, REG_STATUS);
-                if (status & 0x02) { // Kiem tra bit 1 (busy)
+                if (status & 0x01) { // Kiem tra bit 0 (done)
                     break;
                 }
             }
-            // Cho tin hieu busy ve 0 de biet da tinh xong
-            while (1) {
-                status = AXI_READ(cdae_base, REG_STATUS);
-                if ((status & 0x02) == 0) { // Kiem tra bit 1 (busy)
-                    break;
-                }
-            }
+            
+            // Reset REG_CTRL ve 0 de thoat khoi trang thai ST_DONE
+            AXI_WRITE(cdae_base, REG_CTRL, 0);
             clock_gettime(CLOCK_MONOTONIC, &t_end_calc);
 
             clock_gettime(CLOCK_MONOTONIC, &t_start_read);
