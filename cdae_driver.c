@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <math.h>
 
 #define CDAE_BASE_ADDR 0xA0000000
 #define CDAE_MAP_SIZE  0x1000
@@ -41,9 +42,10 @@
 #define AXI_READ(base, offset)        (*(volatile uint32_t *)((uint8_t *)(base) + (offset)))
 
 uint16_t float_to_q12(float val) {
-    if (val > 1.0f) val = 1.0f;
-    if (val < 0.0f) val = 0.0f;
-    return (uint16_t)(val * 4096.0f);
+    int32_t q = (int32_t)roundf(val * 4096.0f);
+    if (q > 32767) q = 32767;
+    if (q < -32768) q = -32768;
+    return (uint16_t)q;
 }
 
 float q12_to_float(uint16_t val) {
@@ -80,6 +82,51 @@ void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
             }
         }
     }
+}
+
+// Ham lam mo duong vien giua cac tile de giau di loi sdt (Feathering)
+void smooth_seams(float *image, int img_w, int img_h, int tile_size, int radius) {
+    float *temp = (float*)malloc(img_w * img_h * IMG_C * sizeof(float));
+    memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
+
+    // 1. Lam mo duong doc (chay ngang qua cac cot vien)
+    for (int x_seam = tile_size; x_seam < img_w; x_seam += tile_size) {
+        for (int y = 0; y < img_h; y++) {
+            for (int x = x_seam - radius; x <= x_seam + radius; x++) {
+                for (int c = 0; c < IMG_C; c++) {
+                    float sum = 0;
+                    for (int k = -radius; k <= radius; k++) {
+                        int px = x + k;
+                        if (px < 0) px = 0;
+                        if (px >= img_w) px = img_w - 1;
+                        sum += temp[(y * img_w + px) * IMG_C + c];
+                    }
+                    image[(y * img_w + x) * IMG_C + c] = sum / (2 * radius + 1);
+                }
+            }
+        }
+    }
+    
+    memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
+
+    // 2. Lam mo duong ngang (chay doc qua cac hang vien)
+    for (int y_seam = tile_size; y_seam < img_h; y_seam += tile_size) {
+        for (int x = 0; x < img_w; x++) {
+            for (int y = y_seam - radius; y <= y_seam + radius; y++) {
+                for (int c = 0; c < IMG_C; c++) {
+                    float sum = 0;
+                    for (int k = -radius; k <= radius; k++) {
+                        int py = y + k;
+                        if (py < 0) py = 0;
+                        if (py >= img_h) py = img_h - 1;
+                        sum += temp[(py * img_w + x) * IMG_C + c];
+                    }
+                    image[(y * img_w + x) * IMG_C + c] = sum / (2 * radius + 1);
+                }
+            }
+        }
+    }
+    free(temp);
 }
 
 int main() {
@@ -212,15 +259,19 @@ int main() {
         }
     }
 
-    printf("[+] Da xu ly xong tat ca cac tile!\n");
+    printf("[*] Da xu ly xong tat ca cac tile!\n");
+
+    // Lam mo duong vien (Feathering) de che di loi Tiling Artifact
+    printf("[*] Dang lam mo cac duong vien soc (Radius=2)...\n");
+    smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
 
     FILE *f_out = fopen("output.bin", "wb");
-    if (!f_out) {
-        perror("Khong the mo file output.bin");
-    } else {
+    if (f_out) {
         fwrite(output_image, sizeof(float), IMG_PIXELS, f_out);
         fclose(f_out);
-        printf("[+] Da ghi ket qua vao output.bin\n");
+        printf("[*] Da ghi ket qua vao output.bin\n");
+    } else {
+        printf("[!] Loi ghi file output.bin\n");
     }
 
     double bytes_total_comm = IMG_PIXELS * 2.0; 
