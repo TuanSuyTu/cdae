@@ -259,8 +259,8 @@ int main() {
     printf("[*] Da xu ly xong tat ca cac tile!\n");
 
     // Lam mo duong vien (Feathering) de che di loi Tiling Artifact
-    printf("[*] Dang lam mo cac duong vien soc (Radius=2)...\n");
-    smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
+    // printf("[*] Dang lam mo cac duong vien soc (Radius=2)...\n");
+    // smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
 
     FILE *f_out = fopen("output.bin", "wb");
     if (f_out) {
