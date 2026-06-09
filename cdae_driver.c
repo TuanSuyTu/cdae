@@ -144,7 +144,8 @@ int main() {
   struct timespec t_start_write, t_end_write;
   struct timespec t_start_calc, t_end_calc;
   struct timespec t_start_read, t_end_read;
-  double time_write, time_calc, time_read, time_total;
+  struct timespec t_start_blur, t_end_blur;
+  double time_write, time_calc, time_read, time_total, time_blur = 0.0;
 
   printf("--- Khoi dong CDAE Driver tren Kria KV260 ---\n");
 
@@ -273,9 +274,17 @@ int main() {
 
   printf("[*] Da xu ly xong tat ca cac tile!\n");
 
-  // Lam mo duong vien (Feathering) de che di loi Tiling Artifact
-  // printf("[*] Dang lam mo cac duong vien soc (Radius=2)...\n");
-  // smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
+  /*
+  printf("[*] Dang lam mo cac duong vien soc (Radius=2)...\n");
+  clock_gettime(CLOCK_MONOTONIC, &t_start_blur);
+
+  smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
+
+  clock_gettime(CLOCK_MONOTONIC, &t_end_blur);
+  time_blur = (t_end_blur.tv_sec - t_start_blur.tv_sec) * 1000.0 +
+  (t_end_blur.tv_nsec - t_start_blur.tv_nsec) / 1000000.0; total_time_total +=
+  time_blur; printf("[*] Lam mo hoan tat trong: %.3f ms\n", time_blur);
+  */
 
   FILE *f_out = fopen("output.bin", "wb");
   if (f_out) {
@@ -301,6 +310,7 @@ int main() {
   printf("    - Ghi data PS sang PL  : %10.3f ms\n", total_time_write);
   printf("    - Tinh toan FPGA Core  : %10.3f ms\n", total_time_calc);
   printf("    - Doc data PL sang PS  : %10.3f ms\n", total_time_read);
+  printf("    - Lam mo soc (Software): %10.3f ms\n", time_blur);
   printf("    -> Tong thoi gian      : %10.3f ms\n\n", total_time_total);
 
   printf("[2] BANG THONG GIAO TIEP THROUGHPUT:\n");
