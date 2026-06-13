@@ -4,7 +4,7 @@
 //   Chuong trinh C chay tren he dieu hanh Linux cua KV260.
 //   Su dung /dev/mem de map khong gian dia chi vat ly cua AXI
 //   vao khong gian ao cua chuong trinh.
-//   Dung de ghi Input, kich hoat Hardware va doc Output.
+//   Ho tro xu ly hang loat (Batch Processing) nhieu anh cung luc.
 // ==========================================================
 #include <fcntl.h>
 #include <math.h>
@@ -56,8 +56,6 @@ uint16_t float_to_q12(float val) {
 float q12_to_float(uint16_t val) { return (float)val / 4096.0f; }
 
 void extract_tile(const float *src_image, float *dst_tile, int ty, int tx) {
-  // src_image: CHW (da xac nhan bang kiem tra binary file)
-  // dst_tile:  CHW (gui xuong FPGA theo thu tu i tang dan)
   for (int c = 0; c < IMG_C; c++) {
     for (int dy = 0; dy < TILE_H; dy++) {
       for (int dx = 0; dx < TILE_W; dx++) {
@@ -72,8 +70,6 @@ void extract_tile(const float *src_image, float *dst_tile, int ty, int tx) {
 }
 
 void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
-  // src_tile: CHW (nhan tu FPGA theo thu tu i tang dan)
-  // dst_image: CHW (ghi ra output.bin)
   for (int c = 0; c < IMG_C; c++) {
     for (int dy = 0; dy < TILE_H; dy++) {
       for (int dx = 0; dx < TILE_W; dx++) {
@@ -87,67 +83,19 @@ void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
   }
 }
 
-// Ham lam mo duong vien giua cac tile de giau di loi sdt (Feathering) - Hoat
-// dong tren mang CHW
-void smooth_seams(float *image, int img_w, int img_h, int tile_size,
-                  int radius) {
-  float *temp = (float *)malloc(img_w * img_h * IMG_C * sizeof(float));
-  memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
-
-  // 1. Lam mo duong doc (chay ngang qua cac cot vien)
-  for (int x_seam = tile_size; x_seam < img_w; x_seam += tile_size) {
-    for (int y = 0; y < img_h; y++) {
-      for (int x = x_seam - radius; x <= x_seam + radius; x++) {
-        for (int c = 0; c < IMG_C; c++) {
-          float sum = 0;
-          for (int k = -radius; k <= radius; k++) {
-            int px = x + k;
-            if (px < 0)
-              px = 0;
-            if (px >= img_w)
-              px = img_w - 1;
-            sum += temp[c * (img_w * img_h) + y * img_w + px];
-          }
-          image[c * (img_w * img_h) + y * img_w + x] = sum / (2 * radius + 1);
-        }
-      }
-    }
-  }
-
-  memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
-
-  // 2. Lam mo duong ngang (chay doc qua cac hang vien)
-  for (int y_seam = tile_size; y_seam < img_h; y_seam += tile_size) {
-    for (int x = 0; x < img_w; x++) {
-      for (int y = y_seam - radius; y <= y_seam + radius; y++) {
-        for (int c = 0; c < IMG_C; c++) {
-          float sum = 0;
-          for (int k = -radius; k <= radius; k++) {
-            int py = y + k;
-            if (py < 0)
-              py = 0;
-            if (py >= img_h)
-              py = img_h - 1;
-            sum += temp[c * (img_w * img_h) + py * img_w + x];
-          }
-          image[c * (img_w * img_h) + y * img_w + x] = sum / (2 * radius + 1);
-        }
-      }
-    }
-  }
-  free(temp);
-}
-
 int main() {
-
   struct timespec t_start_total, t_end_total;
   struct timespec t_start_write, t_end_write;
   struct timespec t_start_calc, t_end_calc;
   struct timespec t_start_read, t_end_read;
-  struct timespec t_start_blur, t_end_blur;
-  double time_write, time_calc, time_read, time_total, time_blur = 0.0;
+  double time_write, time_calc, time_read, time_total = 0.0;
 
-  printf("--- Khoi dong CDAE Driver tren Kria KV260 ---\n");
+  double total_time_write = 0.0;
+  double total_time_calc = 0.0;
+  double total_time_read = 0.0;
+  double total_time_total = 0.0;
+
+  printf("--- Khoi dong CDAE Driver tren Kria KV260 (Batch Mode) ---\n");
 
   int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
   if (mem_fd < 0) {
@@ -171,7 +119,7 @@ int main() {
   float tile_out[TILE_PIXELS];
 
   if (!input_image || !output_image) {
-    perror("Cap phat bo nho cho anh that bai");
+    perror("Cap phat bo nho that bai");
     munmap(cdae_base, CDAE_MAP_SIZE);
     close(mem_fd);
     return -1;
@@ -186,11 +134,11 @@ int main() {
     close(mem_fd);
     return -1;
   }
-  size_t read_bytes = fread(input_image, sizeof(float), IMG_PIXELS, f_inp);
-  fclose(f_inp);
 
-  if (read_bytes != IMG_PIXELS) {
-    printf("[!] Loi: Chi doc duoc %zu phan tu tu input.bin\n", read_bytes);
+  FILE *f_out = fopen("output.bin", "wb");
+  if (!f_out) {
+    perror("Khong the mo file output.bin");
+    fclose(f_inp);
     free(input_image);
     free(output_image);
     munmap(cdae_base, CDAE_MAP_SIZE);
@@ -198,129 +146,120 @@ int main() {
     return -1;
   }
 
-  double total_time_write = 0.0;
-  double total_time_calc = 0.0;
-  double total_time_read = 0.0;
-  double total_time_total = 0.0;
+  int image_count = 0;
 
-  printf("[+] Bat dau xu ly 16 tiles tu anh 224x224x3...\n");
+  // Doc tung anh (moi anh gom IMG_PIXELS float) cho toi khi het file
+  while (fread(input_image, sizeof(float), IMG_PIXELS, f_inp) == IMG_PIXELS) {
+    image_count++;
+    printf("[+] Bat dau xu ly anh thu %d (16 tiles)...\n", image_count);
 
-  for (int ty = 0; ty < TILE_GRID_H; ty++) {
-    for (int tx = 0; tx < TILE_GRID_W; tx++) {
+    for (int ty = 0; ty < TILE_GRID_H; ty++) {
+      for (int tx = 0; tx < TILE_GRID_W; tx++) {
 
-      clock_gettime(CLOCK_MONOTONIC, &t_start_total);
+        clock_gettime(CLOCK_MONOTONIC, &t_start_total);
 
-      extract_tile(input_image, tile_in, ty, tx);
+        extract_tile(input_image, tile_in, ty, tx);
 
-      clock_gettime(CLOCK_MONOTONIC, &t_start_write);
-      for (uint32_t i = 0; i < TILE_PIXELS; i++) {
-        uint16_t q12_val = float_to_q12(tile_in[i]);
-        AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_INP + i);
-        AXI_WRITE(cdae_base, REG_WDATA, q12_val);
-      }
-      clock_gettime(CLOCK_MONOTONIC, &t_end_write);
-
-      clock_gettime(CLOCK_MONOTONIC, &t_start_calc);
-      AXI_WRITE(cdae_base, REG_CTRL, 1);
-
-      // Bat buoc doc lai de dam bao lenh Write (start) da duoc AXI day xuong
-      // FPGA
-      AXI_READ(cdae_base, REG_CTRL);
-
-      uint32_t status = 0;
-      // Cho FPGA xu ly xong bang cach poll cờ busy (bit 1) ve 0
-      // Vi cờ done (bit 0) chi chop 1 xung (10ns) nen CPU de bi bo lo!
-      while (1) {
-        status = AXI_READ(cdae_base, REG_STATUS);
-        if ((status & 0x02) == 0) { // Kiem tra bit 1 (busy == 0)
-          break;
+        // 1. Ghi du lieu vao BRAM
+        clock_gettime(CLOCK_MONOTONIC, &t_start_write);
+        for (uint32_t i = 0; i < TILE_PIXELS; i++) {
+          uint16_t q12_val = float_to_q12(tile_in[i]);
+          AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_INP + i);
+          AXI_WRITE(cdae_base, REG_WDATA, q12_val);
         }
-      }
-      clock_gettime(CLOCK_MONOTONIC, &t_end_calc);
+        clock_gettime(CLOCK_MONOTONIC, &t_end_write);
 
-      clock_gettime(CLOCK_MONOTONIC, &t_start_read);
-      AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT);
-      uint32_t dummy_read = AXI_READ(cdae_base, REG_RDATA);
+        // 2. Kich hoat FPGA
+        clock_gettime(CLOCK_MONOTONIC, &t_start_calc);
+        AXI_WRITE(cdae_base, REG_CTRL, 1);
+        AXI_READ(cdae_base, REG_CTRL);
 
-      for (uint32_t i = 0; i < TILE_PIXELS; i++) {
-        if (i < TILE_PIXELS - 1) {
-          AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT + i + 1);
+        // 3. Cho FPGA xu ly xong (poll co busy ve 0)
+        uint32_t status = 0;
+        while (1) {
+          status = AXI_READ(cdae_base, REG_STATUS);
+          if ((status & 0x02) == 0) {
+            break;
+          }
         }
-        uint32_t raw_data = AXI_READ(cdae_base, REG_RDATA);
-        uint16_t q12_out = (uint16_t)(raw_data & 0xFFFF);
-        tile_out[i] = q12_to_float(q12_out);
+        clock_gettime(CLOCK_MONOTONIC, &t_end_calc);
+
+        // 4. Doc ket qua ve tu URAM
+        clock_gettime(CLOCK_MONOTONIC, &t_start_read);
+        AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT);
+        uint32_t dummy_read = AXI_READ(cdae_base, REG_RDATA);
+
+        for (uint32_t i = 0; i < TILE_PIXELS; i++) {
+          if (i < TILE_PIXELS - 1) {
+            AXI_WRITE(cdae_base, REG_ADDR, RAM_ADDR_OUT + i + 1);
+          }
+          uint32_t raw_data = AXI_READ(cdae_base, REG_RDATA);
+          uint16_t q12_out = (uint16_t)(raw_data & 0xFFFF);
+          tile_out[i] = q12_to_float(q12_out);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &t_end_read);
+
+        insert_tile(tile_out, output_image, ty, tx);
+
+        clock_gettime(CLOCK_MONOTONIC, &t_end_total);
+
+        // Cong don thoi gian
+        time_write = (t_end_write.tv_sec - t_start_write.tv_sec) * 1000.0 +
+                     (t_end_write.tv_nsec - t_start_write.tv_nsec) / 1000000.0;
+        time_calc = (t_end_calc.tv_sec - t_start_calc.tv_sec) * 1000.0 +
+                    (t_end_calc.tv_nsec - t_start_calc.tv_nsec) / 1000000.0;
+        time_read = (t_end_read.tv_sec - t_start_read.tv_sec) * 1000.0 +
+                    (t_end_read.tv_nsec - t_start_read.tv_nsec) / 1000000.0;
+        time_total = (t_end_total.tv_sec - t_start_total.tv_sec) * 1000.0 +
+                     (t_end_total.tv_nsec - t_start_total.tv_nsec) / 1000000.0;
+
+        total_time_write += time_write;
+        total_time_calc += time_calc;
+        total_time_read += time_read;
+        total_time_total += time_total;
       }
-      clock_gettime(CLOCK_MONOTONIC, &t_end_read);
-
-      insert_tile(tile_out, output_image, ty, tx);
-
-      clock_gettime(CLOCK_MONOTONIC, &t_end_total);
-
-      time_write = (t_end_write.tv_sec - t_start_write.tv_sec) * 1000.0 +
-                   (t_end_write.tv_nsec - t_start_write.tv_nsec) / 1000000.0;
-      time_calc = (t_end_calc.tv_sec - t_start_calc.tv_sec) * 1000.0 +
-                  (t_end_calc.tv_nsec - t_start_calc.tv_nsec) / 1000000.0;
-      time_read = (t_end_read.tv_sec - t_start_read.tv_sec) * 1000.0 +
-                  (t_end_read.tv_nsec - t_start_read.tv_nsec) / 1000000.0;
-      time_total = (t_end_total.tv_sec - t_start_total.tv_sec) * 1000.0 +
-                   (t_end_total.tv_nsec - t_start_total.tv_nsec) / 1000000.0;
-
-      total_time_write += time_write;
-      total_time_calc += time_calc;
-      total_time_read += time_read;
-      total_time_total += time_total;
     }
-  }
 
-  printf("[*] Da xu ly xong tat ca cac tile!\n");
-
-  /*
-  printf("[*] Dang lam mo cac duong vien soc (Radius=2)...\n");
-  clock_gettime(CLOCK_MONOTONIC, &t_start_blur);
-
-  smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
-
-  clock_gettime(CLOCK_MONOTONIC, &t_end_blur);
-  time_blur = (t_end_blur.tv_sec - t_start_blur.tv_sec) * 1000.0 +
-  (t_end_blur.tv_nsec - t_start_blur.tv_nsec) / 1000000.0; total_time_total +=
-  time_blur; printf("[*] Lam mo hoan tat trong: %.3f ms\n", time_blur);
-  */
-
-  FILE *f_out = fopen("output.bin", "wb");
-  if (f_out) {
+    // Ghi toan bo anh nay vao file output
     fwrite(output_image, sizeof(float), IMG_PIXELS, f_out);
-    fclose(f_out);
-    printf("[*] Da ghi ket qua vao output.bin\n");
-  } else {
-    printf("[!] Loi ghi file output.bin\n");
   }
 
-  double bytes_total_comm = IMG_PIXELS * 2.0;
+  fclose(f_inp);
+  fclose(f_out);
 
-  double bw_write =
-      (bytes_total_comm / 1048576.0) / (total_time_write / 1000.0);
-  double bw_read = (bytes_total_comm / 1048576.0) / (total_time_read / 1000.0);
-  double bw_total = (bytes_total_comm * 2.0 / 1048576.0) /
-                    ((total_time_write + total_time_read) / 1000.0);
+  if (image_count == 0) {
+    printf("[!] Khong co anh nao duoc doc tu input.bin\n");
+  } else {
+    printf("[*] Da ghi hoan tat %d anh vao output.bin\n", image_count);
 
-  double fps = 1000.0 / total_time_total;
+    double bytes_total_comm = IMG_PIXELS * 2.0 * image_count;
+    double bw_write =
+        (bytes_total_comm / 1048576.0) / (total_time_write / 1000.0);
+    double bw_read =
+        (bytes_total_comm / 1048576.0) / (total_time_read / 1000.0);
+    double bw_total = (bytes_total_comm * 2.0 / 1048576.0) /
+                      ((total_time_write + total_time_read) / 1000.0);
+    double fps = (1000.0 * image_count) / total_time_total;
 
-  printf("\n================ BANG THONG KE HIEU NANG =================\n");
-  printf("[1] THOI GIAN XU LY TONG CO HIEU 16 TILES:\n");
-  printf("    - Ghi data PS sang PL  : %10.3f ms\n", total_time_write);
-  printf("    - Tinh toan FPGA Core  : %10.3f ms\n", total_time_calc);
-  printf("    - Doc data PL sang PS  : %10.3f ms\n", total_time_read);
-  printf("    - Lam mo soc (Software): %10.3f ms\n", time_blur);
-  printf("    -> Tong thoi gian      : %10.3f ms\n\n", total_time_total);
+    printf("\n================ BANG THONG KE HIEU NANG (%d ANH) "
+           "=================\n",
+           image_count);
+    printf("[1] THOI GIAN XU LY TONG CO HIEU:\n");
+    printf("    - Ghi data PS sang PL  : %10.3f ms\n", total_time_write);
+    printf("    - Tinh toan FPGA Core  : %10.3f ms\n", total_time_calc);
+    printf("    - Doc data PL sang PS  : %10.3f ms\n", total_time_read);
+    printf("    -> Tong thoi gian      : %10.3f ms\n\n", total_time_total);
 
-  printf("[2] BANG THONG GIAO TIEP THROUGHPUT:\n");
-  printf("    - Toc do ghi Input     : %10.3f MB/s\n", bw_write);
-  printf("    - Toc do doc Output    : %10.3f MB/s\n", bw_read);
-  printf("    -> Bang thong trung binh: %10.3f MB/s\n\n", bw_total);
+    printf("[2] BANG THONG GIAO TIEP THROUGHPUT:\n");
+    printf("    - Toc do ghi Input     : %10.3f MB/s\n", bw_write);
+    printf("    - Toc do doc Output    : %10.3f MB/s\n", bw_read);
+    printf("    -> Bang thong trung binh: %10.3f MB/s\n\n", bw_total);
 
-  printf("[3] TOC DO KHUNG HINH FPS CHO ANH 224x224:\n");
-  printf("    -> FPS dat duoc        : %10.2f frames/s\n", fps);
-  printf("==========================================================\n\n");
+    printf("[3] TOC DO KHUNG HINH FPS:\n");
+    printf("    -> FPS trung binh      : %10.2f frames/s\n", fps);
+    printf("=================================================================="
+           "\n\n");
+  }
 
   free(input_image);
   free(output_image);
