@@ -4,7 +4,8 @@
 //   Chuong trinh C chay tren he dieu hanh Linux cua KV260.
 //   Su dung /dev/mem de map khong gian dia chi vat ly cua AXI
 //   vao khong gian ao cua chuong trinh.
-//   Ho tro xu ly hang loat (Batch Processing) nhieu anh cung luc.
+//   Ho tro xu ly hang loat (Batch Processing) nhieu anh cung luc
+//   va chuc nang lam mo sdt (Feathering).
 // ==========================================================
 #include <fcntl.h>
 #include <math.h>
@@ -83,16 +84,70 @@ void insert_tile(const float *src_tile, float *dst_image, int ty, int tx) {
   }
 }
 
+// Ham lam mo duong vien giua cac tile de giau di loi sdt (Feathering) - Hoat
+// dong tren mang CHW
+void smooth_seams(float *image, int img_w, int img_h, int tile_size,
+                  int radius) {
+  float *temp = (float *)malloc(img_w * img_h * IMG_C * sizeof(float));
+  memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
+
+  // 1. Lam mo duong doc (chay ngang qua cac cot vien)
+  for (int x_seam = tile_size; x_seam < img_w; x_seam += tile_size) {
+    for (int y = 0; y < img_h; y++) {
+      for (int x = x_seam - radius; x <= x_seam + radius; x++) {
+        for (int c = 0; c < IMG_C; c++) {
+          float sum = 0;
+          for (int k = -radius; k <= radius; k++) {
+            int px = x + k;
+            if (px < 0)
+              px = 0;
+            if (px >= img_w)
+              px = img_w - 1;
+            sum += temp[c * (img_w * img_h) + y * img_w + px];
+          }
+          image[c * (img_w * img_h) + y * img_w + x] = sum / (2 * radius + 1);
+        }
+      }
+    }
+  }
+
+  memcpy(temp, image, img_w * img_h * IMG_C * sizeof(float));
+
+  // 2. Lam mo duong ngang (chay doc qua cac hang vien)
+  for (int y_seam = tile_size; y_seam < img_h; y_seam += tile_size) {
+    for (int x = 0; x < img_w; x++) {
+      for (int y = y_seam - radius; y <= y_seam + radius; y++) {
+        for (int c = 0; c < IMG_C; c++) {
+          float sum = 0;
+          for (int k = -radius; k <= radius; k++) {
+            int py = y + k;
+            if (py < 0)
+              py = 0;
+            if (py >= img_h)
+              py = img_h - 1;
+            sum += temp[c * (img_w * img_h) + py * img_w + x];
+          }
+          image[c * (img_w * img_h) + y * img_w + x] = sum / (2 * radius + 1);
+        }
+      }
+    }
+  }
+  free(temp);
+}
+
 int main() {
   struct timespec t_start_total, t_end_total;
   struct timespec t_start_write, t_end_write;
   struct timespec t_start_calc, t_end_calc;
   struct timespec t_start_read, t_end_read;
-  double time_write, time_calc, time_read, time_total = 0.0;
-
+  struct timespec t_start_blur, t_end_blur;
+  
+  double time_write, time_calc, time_read, time_total, time_blur = 0.0;
+  
   double total_time_write = 0.0;
   double total_time_calc = 0.0;
   double total_time_read = 0.0;
+  double total_time_blur = 0.0;
   double total_time_total = 0.0;
 
   printf("--- Khoi dong CDAE Driver tren Kria KV260 (Batch Mode) ---\n");
@@ -151,7 +206,7 @@ int main() {
   // Doc tung anh (moi anh gom IMG_PIXELS float) cho toi khi het file
   while (fread(input_image, sizeof(float), IMG_PIXELS, f_inp) == IMG_PIXELS) {
     image_count++;
-    printf("[+] Bat dau xu ly anh thu %d (16 tiles)...\n", image_count);
+    printf("\n[+] Bat dau xu ly anh thu %d (16 tiles)...\n", image_count);
 
     for (int ty = 0; ty < TILE_GRID_H; ty++) {
       for (int tx = 0; tx < TILE_GRID_W; tx++) {
@@ -178,7 +233,7 @@ int main() {
         uint32_t status = 0;
         while (1) {
           status = AXI_READ(cdae_base, REG_STATUS);
-          if ((status & 0x02) == 0) {
+          if ((status & 0x02) == 0) { 
             break;
           }
         }
@@ -219,7 +274,17 @@ int main() {
         total_time_total += time_total;
       }
     }
-
+    
+    // Lam mo duong vien soc (Radius=2) cho anh hien tai
+    clock_gettime(CLOCK_MONOTONIC, &t_start_blur);
+    smooth_seams(output_image, IMG_W, IMG_H, TILE_W, 2);
+    clock_gettime(CLOCK_MONOTONIC, &t_end_blur);
+    time_blur = (t_end_blur.tv_sec - t_start_blur.tv_sec) * 1000.0 +
+                (t_end_blur.tv_nsec - t_start_blur.tv_nsec) / 1000000.0;
+    
+    total_time_blur += time_blur;
+    total_time_total += time_blur; // Cong ca blur vao tong thoi gian cua anh
+    
     // Ghi toan bo anh nay vao file output
     fwrite(output_image, sizeof(float), IMG_PIXELS, f_out);
   }
@@ -230,24 +295,20 @@ int main() {
   if (image_count == 0) {
     printf("[!] Khong co anh nao duoc doc tu input.bin\n");
   } else {
-    printf("[*] Da ghi hoan tat %d anh vao output.bin\n", image_count);
+    printf("\n[*] Da ghi hoan tat %d anh vao output.bin\n", image_count);
 
     double bytes_total_comm = IMG_PIXELS * 2.0 * image_count;
-    double bw_write =
-        (bytes_total_comm / 1048576.0) / (total_time_write / 1000.0);
-    double bw_read =
-        (bytes_total_comm / 1048576.0) / (total_time_read / 1000.0);
-    double bw_total = (bytes_total_comm * 2.0 / 1048576.0) /
-                      ((total_time_write + total_time_read) / 1000.0);
+    double bw_write = (bytes_total_comm / 1048576.0) / (total_time_write / 1000.0);
+    double bw_read = (bytes_total_comm / 1048576.0) / (total_time_read / 1000.0);
+    double bw_total = (bytes_total_comm * 2.0 / 1048576.0) / ((total_time_write + total_time_read) / 1000.0);
     double fps = (1000.0 * image_count) / total_time_total;
 
-    printf("\n================ BANG THONG KE HIEU NANG (%d ANH) "
-           "=================\n",
-           image_count);
+    printf("\n================ BANG THONG KE HIEU NANG (%d ANH) =================\n", image_count);
     printf("[1] THOI GIAN XU LY TONG CO HIEU:\n");
     printf("    - Ghi data PS sang PL  : %10.3f ms\n", total_time_write);
     printf("    - Tinh toan FPGA Core  : %10.3f ms\n", total_time_calc);
     printf("    - Doc data PL sang PS  : %10.3f ms\n", total_time_read);
+    printf("    - Lam mo soc (Software): %10.3f ms\n", total_time_blur);
     printf("    -> Tong thoi gian      : %10.3f ms\n\n", total_time_total);
 
     printf("[2] BANG THONG GIAO TIEP THROUGHPUT:\n");
@@ -257,8 +318,7 @@ int main() {
 
     printf("[3] TOC DO KHUNG HINH FPS:\n");
     printf("    -> FPS trung binh      : %10.2f frames/s\n", fps);
-    printf("=================================================================="
-           "\n\n");
+    printf("==================================================================\n\n");
   }
 
   free(input_image);
