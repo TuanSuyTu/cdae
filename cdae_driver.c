@@ -284,7 +284,7 @@ int main() {
     
     total_time_blur += time_blur;
     total_time_total += time_blur; // Cong ca blur vao tong thoi gian cua anh
-    
+
     // Ghi toan bo anh nay vao file output
     fwrite(output_image, sizeof(float), IMG_PIXELS, f_out);
   }
@@ -309,7 +309,8 @@ int main() {
     printf("    - Tinh toan FPGA Core  : %10.3f ms\n", total_time_calc);
     printf("    - Doc data PL sang PS  : %10.3f ms\n", total_time_read);
     printf("    - Lam mo soc (Software): %10.3f ms\n", total_time_blur);
-    printf("    -> Tong thoi gian      : %10.3f ms\n\n", total_time_total);
+    printf("    -> Tong thoi gian      : %10.3f ms\n", total_time_total);
+    printf("    -> Trung binh 1 anh    : %10.3f ms\n\n", total_time_total / image_count);
 
     printf("[2] BANG THONG GIAO TIEP THROUGHPUT:\n");
     printf("    - Toc do ghi Input     : %10.3f MB/s\n", bw_write);
